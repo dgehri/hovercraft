@@ -162,7 +162,7 @@ void handle_hover_state(const RxData& rxData, int gyro_z)
 {
     hoverMotor.set(hover_val);
 
-    auto dir_bias = (gyro_z * ((rxData.dir_damping_factor / 2) + 16)) / 32;
+    auto dir_bias = (gyro_z * ((rxData.dir_damping_factor / 2) + 16)) / 64;
     auto dir_us = rxData.dir_us + dir_bias;
     auto dir_delta_us = dir_us - DIR_CENTER;
     auto right_us = rxData.thrust_us - dir_delta_us;
