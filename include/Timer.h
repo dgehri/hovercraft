@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <stdint.h>
 
+constexpr uint16_t COUNT_PER_MICROS = 2;
+
 // high-precision timer
 class Timer
 {
@@ -57,7 +59,7 @@ public:
                                  // (ex: T2_micros). (Note: 255 counts / 2 counts/us = 127.5us) Note: this line of code
                                  // DID in fact fix the error just described, in which I periodically saw an error of
                                  // ~127.5us in some values read in by some PWM read code I wrote.
-            ++_overflow_count;  // force the overflow count to increment
+            increment_overflow_count();  // force the overflow count to increment
             TIFR2 |= 0b00000001;  // reset Timer2 overflow flag since we just manually incremented above; see datasheet
                                   // pg. 160; this prevents execution of Timer2's overflow ISR
         }
@@ -77,7 +79,7 @@ public:
                               // of Timer2's overflow ISR
     }
 
-    void increment_overflow_count()
+    void increment_overflow_count() const
     {
         ++_overflow_count;
     }

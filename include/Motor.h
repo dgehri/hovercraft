@@ -11,10 +11,10 @@
 
 struct Range
 {
-    int min_us;
-    int max_us;
-    int start_us;   // value at which motor starts
-    int stop_us;    // value at which motor stopps
+    uint16_t min_us;
+    uint16_t max_us;
+    uint16_t start_us;   // value at which motor starts
+    uint16_t stop_us;    // value at which motor stopps
 };
 
 class Motor
@@ -40,7 +40,7 @@ public:
         return _value_us;
     }
 
-    void set(int value_us, bool clamp = true)
+    void set(uint16_t value_us, bool clamp = true)
     {
         if (clamp)
         {
@@ -58,10 +58,10 @@ public:
     }
 
 private:
-    const int _disabled;
+    const uint16_t _disabled;
     const int _pin;
     const Range _range;
     Servo _pwm;
-    int _value_us;
+    uint16_t _value_us;
     uint32_t _start_time;
 };
