@@ -43,7 +43,7 @@ void rainbowCycle(RainBowState& state, int speedDelayMs)
         
         if (++state.pixel == NUM_PIXEL)
         {
-            pixels.show();
+            //pixels.show();
 
             state.prevTimer = Timer::instance().get_count();
 
