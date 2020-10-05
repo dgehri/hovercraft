@@ -6,10 +6,6 @@
 #include "led_gauge.h"
 #include <Arduino.h>
 #include <estd/algorithm.h>
-#include <Adafruit_NeoPixel.h>
-#ifdef __AVR__
-#include <avr/power.h>
-#endif
 
 // #define OUTPUT_READABLE_ACCELGYRO
 
@@ -21,28 +17,28 @@ constexpr uint8_t PIN_TX_LEFT_FAN = 7;
 constexpr uint8_t PIN_TX_RIGHT_FAN = 8;
 
 // all in microseconds
-constexpr uint16_t FAIL_SAFE_TIMEOUT_US = 1000;
+constexpr int16_t FAIL_SAFE_TIMEOUT_US = 1000;
 constexpr uint32_t INIT_TIME_US = 3000000;
-constexpr uint16_t DEAD_ZONE = 10;
-constexpr uint16_t DIR_CENTER = 1500;
-constexpr uint16_t HOVER_MID_VALUE = 1500;
-constexpr uint16_t STOP_VAL = 990;
-constexpr uint16_t START_VAL = 1020;
-constexpr uint16_t MIN_VAL = 980;
-constexpr uint16_t MAX_VAL = 2020;
-constexpr uint16_t TUNE_VAL = 1800;
-constexpr uint16_t INIT_VAL = 900;
-constexpr uint16_t ZERO_HOVER_FAN = 980;
-constexpr uint16_t ZERO_LEFT_FAN = 1470;
-constexpr uint16_t ZERO_RIGHT_FAN = 1480;
-constexpr uint16_t HOVER_DEFAULT_VAL = 1100;
-constexpr uint16_t HOVER_FAILSAFE_VALUE = 1030;
+constexpr int16_t DEAD_ZONE = 10;
+constexpr int16_t DIR_CENTER = 1500;
+constexpr int16_t HOVER_MID_VALUE = 1500;
+constexpr int16_t STOP_VAL = 990;
+constexpr int16_t START_VAL = 1020;
+constexpr int16_t MIN_VAL = 980;
+constexpr int16_t MAX_VAL = 2020;
+constexpr int16_t TUNE_VAL = 1800;
+constexpr int16_t INIT_VAL = 900;
+constexpr int16_t ZERO_HOVER_FAN = 980;
+constexpr int16_t ZERO_LEFT_FAN = 1470;
+constexpr int16_t ZERO_RIGHT_FAN = 1477;
+constexpr int16_t HOVER_DEFAULT_VAL = 1100;
+constexpr int16_t HOVER_FAILSAFE_VALUE = 1030;
 
 uint32_t init_time = 0;
 bool fail_safe = false;
 bool init_done = false;
 int16_t int_count = 0;
-uint16_t hover_val = HOVER_DEFAULT_VAL;
+int16_t hover_val = HOVER_DEFAULT_VAL;
 const Range range = {MIN_VAL, MAX_VAL, START_VAL, STOP_VAL};
 Motor leftMotor(PIN_TX_LEFT_FAN, range);
 Motor rightMotor(PIN_TX_RIGHT_FAN, range);
@@ -66,10 +62,10 @@ State state = State::Init;
 
 struct RxData
 {
-    uint16_t thrust_us;
-    uint16_t dir_us;
-    uint16_t hover_us;
-    uint16_t dir_damping_factor;  // 0 .. 32 (full .. no steering)
+    int16_t thrust_us;
+    int16_t dir_us;
+    int16_t hover_us;
+    int16_t dir_damping_factor; // 0 .. 32 (full .. no steering)
 };
 
 
@@ -177,19 +173,22 @@ void update_state_machine(const RxData& rxData, int16_t gyro_z)
     switch (state)
     {
     case State::Init:
-    {
-        uint16_t h = eeprom_read_int(EEPROM_HOVER_VALUE_ADDR);
-        if (h > MIN_VAL and h < MAX_VAL)
         {
-            hover_val = h;
-        }
-    }
-        rightMotor.set(DIR_CENTER, false);
-        leftMotor.set(DIR_CENTER, false);
-        hoverMotor.set(INIT_VAL, false);
-        if (micros() - init_time > INIT_TIME_US)
-        {
-            state = State::Idle;
+            int16_t h = eeprom_read_int(EEPROM_HOVER_VALUE_ADDR);
+            if (h > MIN_VAL and h < MAX_VAL)
+            {
+                hover_val = h;
+            }
+
+            rightMotor.set(DIR_CENTER, false);
+            leftMotor.set(DIR_CENTER, false);
+            hoverMotor.set(INIT_VAL, false);
+            if (micros() - init_time > INIT_TIME_US)
+            {
+                state = State::Idle;
+            }
+
+            rainbowCycle(cycle, 5);
         }
         break;
 
@@ -310,8 +309,5 @@ void loop()
     auto&& rxData = read_rc_inputs();
     auto gyro_z = gyro.read();
     update_state_machine(rxData, gyro_z);
-
-    rainbowCycle(cycle, 5);
-
     serial_out(rxData, gyro_z);
 }

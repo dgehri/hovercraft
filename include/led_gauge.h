@@ -36,14 +36,14 @@ struct RainBowState
 
 void rainbowCycle(RainBowState& state, int speedDelayMs)
 {
-    if (Timer::instance().get_count() - state.prevTimer > COUNT_PER_MICROS * speedDelayMs)
+    if (Timer::instance().get_count() - state.prevTimer > static_cast<uint16_t>(COUNT_PER_MICROS * speedDelayMs))
     {
         auto c = wheelColor(((state.pixel * 256 / NUM_PIXEL) + state.phase) & 255);
         pixels.setPixelColor(state.pixel, c);
         
         if (++state.pixel == NUM_PIXEL)
         {
-            //pixels.show();
+            pixels.show();
 
             state.prevTimer = Timer::instance().get_count();
 

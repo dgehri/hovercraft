@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-constexpr uint16_t COUNT_PER_MICROS = 2;
+constexpr int16_t COUNT_PER_MICROS = 2;
 
 // high-precision timer
 class Timer
