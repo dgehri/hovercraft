@@ -1,11 +1,7 @@
 #pragma once
 
-#define USE_SERVO_LIBRARY
-
+#include "RcPwm.h"
 #include <Arduino.h>
-#ifdef USE_SERVO_LIBRARY
-#   include <Servo.h>
-#endif
 #include <assert.h>
 #include <estd/algorithm.h>
 
@@ -61,7 +57,7 @@ private:
     const uint16_t _disabled;
     const int _pin;
     const Range _range;
-    Servo _pwm;
+    RcPwm _pwm;
     uint16_t _value_us;
     uint32_t _start_time;
 };

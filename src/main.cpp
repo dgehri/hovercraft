@@ -3,11 +3,9 @@
 #include "RcChannel.h"
 #include "Timer.h"
 #include "eeprom_util.h"
-#include "led_gauge.h"
+#include "LedGauge.h"
 #include <Arduino.h>
 #include <estd/algorithm.h>
-
-// #define OUTPUT_READABLE_ACCELGYRO
 
 constexpr uint8_t PIN_RX_DIR = 2;
 constexpr uint8_t PIN_RX_THRUST = 3;
@@ -15,6 +13,7 @@ constexpr uint8_t PIN_RX_HOVER = 4;
 constexpr uint8_t PIN_TX_HOVER = 11;
 constexpr uint8_t PIN_TX_LEFT_FAN = 7;
 constexpr uint8_t PIN_TX_RIGHT_FAN = 8;
+constexpr uint8_t PIN_NEOPIXEL = 6;
 
 // all in microseconds
 constexpr int16_t FAIL_SAFE_TIMEOUT_US = 1000;
@@ -43,10 +42,11 @@ const Range range = {MIN_VAL, MAX_VAL, START_VAL, STOP_VAL};
 Motor leftMotor(PIN_TX_LEFT_FAN, range);
 Motor rightMotor(PIN_TX_RIGHT_FAN, range);
 Motor hoverMotor(PIN_TX_HOVER, range, false);
-RcChannel thrustChannel(PIN_RX_THRUST, DIR_CENTER);
-RcChannel dirChannel(PIN_RX_DIR, DIR_CENTER);
-RcChannel hoverChannel(PIN_RX_HOVER, MIN_VAL);
+RcChannel thrust_counter(PIN_RX_THRUST, DIR_CENTER);
+RcChannel dir_counter(PIN_RX_DIR, DIR_CENTER);
+RcChannel hover_counter(PIN_RX_HOVER, MIN_VAL);
 Gyro gyro;
+LedGauge gauge(PIN_NEOPIXEL);
 
 enum class State
 {
@@ -68,7 +68,6 @@ struct RxData
     int16_t dir_damping_factor; // 0 .. 32 (full .. no steering)
 };
 
-
 void setup()
 {
     init_done = false;
@@ -80,7 +79,7 @@ void setup()
     Serial.println("\nConfiguring...");
 
     Serial.println("- Pixels");
-    pixels.begin();
+    gauge.setup();
 
     Serial.println("- Gyro");
     gyro.setup();
@@ -94,14 +93,14 @@ void setup()
     Serial.println("- Hover Motor");
     hoverMotor.setup();
 
-    Serial.println("- Thrust Channel");
-    thrustChannel.setup();
+    Serial.println("- Thrust _counter");
+    thrust_counter.setup();
 
-    Serial.println("- Steering Channel");
-    dirChannel.setup();
+    Serial.println("- Steering _counter");
+    dir_counter.setup();
 
-    Serial.println("- Hover Channel");
-    hoverChannel.setup();
+    Serial.println("- Hover _counter");
+    hover_counter.setup();
 
     Serial.println("- Timer");
     Timer::instance().setup();
@@ -112,22 +111,22 @@ ISR(PCINT2_vect)  // handle pin change interrupt for D0 to D7 here
     auto pind = PIND;
     auto cnt = Timer::instance().get_count();
 
-    if (thrustChannel.rx(pind, cnt))
+    if (thrust_counter.rx(pind, cnt))
     {
         // force rising edge of DIR
         pind |= bit(PIN_RX_DIR);
     }
 
-    dirChannel.rx(pind, cnt);
-    hoverChannel.rx(pind, cnt);
+    dir_counter.rx(pind, cnt);
+    hover_counter.rx(pind, cnt);
 }
 
 RxData read_rc_inputs()
 {
     RxData rx;
-    rx.thrust_us = thrustChannel.pulse_length() / COUNT_PER_MICROS;
-    rx.dir_us = dirChannel.pulse_length() / COUNT_PER_MICROS;
-    rx.hover_us = hoverChannel.pulse_length() / COUNT_PER_MICROS;
+    rx.thrust_us = thrust_counter.pulse_length() / COUNT_PER_MICROS;
+    rx.dir_us = dir_counter.pulse_length() / COUNT_PER_MICROS;
+    rx.hover_us = hover_counter.pulse_length() / COUNT_PER_MICROS;
 
     if (rx.dir_us < DIR_CENTER - DEAD_ZONE)
     {
@@ -188,7 +187,7 @@ void update_state_machine(const RxData& rxData, int16_t gyro_z)
                 state = State::Idle;
             }
 
-            rainbowCycle(cycle, 5);
+            //gauge.rainbowCycle(5);
         }
         break;
 
@@ -298,9 +297,9 @@ void serial_out(const RxData& rxData, int16_t gyro_z)
     case 6: serial_print(" df: ", rxData.dir_damping_factor); break;
     case 7: serial_print(" gz: ", gyro_z); break;
     case 8: serial_print(" FS: ", fail_safe); break;
-    case 9: serial_print(" ST: ", to_string(state));
-    case 10: serial_print(" HV: ", hover_val);
-    default: k = 0; Serial.println();
+    case 9: serial_print(" ST: ", to_string(state)); break;
+    case 10: serial_print(" HV: ", hover_val); break;
+    default: k = 0; Serial.println(); break;
     }
 }
 
