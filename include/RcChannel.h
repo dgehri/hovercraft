@@ -20,6 +20,13 @@ public:
     // pulse length in us
     uint32_t pulse_length() const { return _pulse_length; }
 
+    /**
+     * Handle RC channel pin change
+     * 
+     * @param pind Value of PIND
+     * @param us Current time [us]
+     * @return \c true on detected falling edge (end of RC channel signal)
+     */
     bool rx(uint8_t pind, uint32_t us) __attribute__((always_inline))
     {
         bool falling = false;

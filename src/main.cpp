@@ -36,15 +36,16 @@ constexpr int16_t HOVER_FAILSAFE_VALUE = 1030;
 uint32_t init_time = 0;
 bool fail_safe = false;
 bool init_done = false;
+volatile bool rx_done = false;
 int16_t int_count = 0;
 int16_t hover_val = HOVER_DEFAULT_VAL;
 const Range range = {MIN_VAL, MAX_VAL, START_VAL, STOP_VAL};
-Motor leftMotor(PIN_TX_LEFT_FAN, range);
-Motor rightMotor(PIN_TX_RIGHT_FAN, range);
-Motor hoverMotor(PIN_TX_HOVER, range, false);
-RcChannel thrust_counter(PIN_RX_THRUST, DIR_CENTER);
-RcChannel dir_counter(PIN_RX_DIR, DIR_CENTER);
-RcChannel hover_counter(PIN_RX_HOVER, MIN_VAL);
+Motor left_motor(PIN_TX_LEFT_FAN, range);
+Motor right_motor(PIN_TX_RIGHT_FAN, range);
+Motor hover_motor(PIN_TX_HOVER, range, false);
+RcChannel thrust_channel_rx(PIN_RX_THRUST, DIR_CENTER);
+RcChannel dir_channel_rx(PIN_RX_DIR, DIR_CENTER);
+RcChannel hover_channel_rx(PIN_RX_HOVER, MIN_VAL);
 Gyro gyro;
 LedGauge gauge(PIN_NEOPIXEL);
 
@@ -85,48 +86,49 @@ void setup()
     gyro.setup();
 
     Serial.println("- Left Motor");
-    leftMotor.setup();
+    left_motor.setup();
 
     Serial.println("- Right Motor");
-    rightMotor.setup();
+    right_motor.setup();
 
     Serial.println("- Hover Motor");
-    hoverMotor.setup();
+    hover_motor.setup();
 
     Serial.println("- Thrust _counter");
-    thrust_counter.setup();
+    thrust_channel_rx.setup();
 
     Serial.println("- Steering _counter");
-    dir_counter.setup();
+    dir_channel_rx.setup();
 
     Serial.println("- Hover _counter");
-    hover_counter.setup();
+    hover_channel_rx.setup();
 
     Serial.println("- Timer");
     Timer::instance().setup();
 }
 
+// pin change interrupt for receiving RC signals
 ISR(PCINT2_vect)  // handle pin change interrupt for D0 to D7 here
 {
     auto pind = PIND;
     auto cnt = Timer::instance().get_count();
 
-    if (thrust_counter.rx(pind, cnt))
+    if (thrust_channel_rx.rx(pind, cnt))
     {
         // force rising edge of DIR
         pind |= bit(PIN_RX_DIR);
     }
 
-    dir_counter.rx(pind, cnt);
-    hover_counter.rx(pind, cnt);
+    dir_channel_rx.rx(pind, cnt);
+    rx_done = hover_channel_rx.rx(pind, cnt);
 }
 
 RxData read_rc_inputs()
 {
     RxData rx;
-    rx.thrust_us = thrust_counter.pulse_length() / COUNT_PER_MICROS;
-    rx.dir_us = dir_counter.pulse_length() / COUNT_PER_MICROS;
-    rx.hover_us = hover_counter.pulse_length() / COUNT_PER_MICROS;
+    rx.thrust_us = thrust_channel_rx.pulse_length() / COUNT_PER_MICROS;
+    rx.dir_us = dir_channel_rx.pulse_length() / COUNT_PER_MICROS;
+    rx.hover_us = hover_channel_rx.pulse_length() / COUNT_PER_MICROS;
 
     if (rx.dir_us < DIR_CENTER - DEAD_ZONE)
     {
@@ -146,7 +148,7 @@ RxData read_rc_inputs()
 
 void handle_hover_state(const RxData& rxData, int16_t gyro_z)
 {
-    hoverMotor.set(hover_val);
+    hover_motor.set(hover_val);
 
     auto dir_bias = (gyro_z * ((rxData.dir_damping_factor / 2) + 16)) / 64;
     auto dir_us = rxData.dir_us + dir_bias;
@@ -154,8 +156,8 @@ void handle_hover_state(const RxData& rxData, int16_t gyro_z)
     auto right_us = rxData.thrust_us - dir_delta_us;
     auto left_us = rxData.thrust_us + dir_delta_us;
 
-    leftMotor.set(ZERO_LEFT_FAN + (left_us - DIR_CENTER) / 2);
-    rightMotor.set(ZERO_RIGHT_FAN + (right_us - DIR_CENTER) / 2);
+    left_motor.set(ZERO_LEFT_FAN + (left_us - DIR_CENTER) / 2);
+    right_motor.set(ZERO_RIGHT_FAN + (right_us - DIR_CENTER) / 2);
 }
 
 void update_state_machine(const RxData& rxData, int16_t gyro_z)
@@ -179,9 +181,9 @@ void update_state_machine(const RxData& rxData, int16_t gyro_z)
                 hover_val = h;
             }
 
-            rightMotor.set(DIR_CENTER, false);
-            leftMotor.set(DIR_CENTER, false);
-            hoverMotor.set(INIT_VAL, false);
+            right_motor.set(DIR_CENTER, false);
+            left_motor.set(DIR_CENTER, false);
+            hover_motor.set(INIT_VAL, false);
             if (micros() - init_time > INIT_TIME_US)
             {
                 state = State::Idle;
@@ -192,9 +194,9 @@ void update_state_machine(const RxData& rxData, int16_t gyro_z)
         break;
 
     case State::Idle:
-        hoverMotor.set(ZERO_HOVER_FAN);
-        leftMotor.set(ZERO_LEFT_FAN);
-        rightMotor.set(ZERO_RIGHT_FAN);
+        hover_motor.set(ZERO_HOVER_FAN);
+        left_motor.set(ZERO_LEFT_FAN);
+        right_motor.set(ZERO_RIGHT_FAN);
         if (toggle_hover && !fail_safe)
         {
             if (!tune)
@@ -229,9 +231,9 @@ void update_state_machine(const RxData& rxData, int16_t gyro_z)
         break;
 
     case State::FailSafe:
-        hoverMotor.set(HOVER_FAILSAFE_VALUE);
-        leftMotor.set(ZERO_LEFT_FAN);
-        rightMotor.set(ZERO_RIGHT_FAN);
+        hover_motor.set(HOVER_FAILSAFE_VALUE);
+        left_motor.set(ZERO_LEFT_FAN);
+        right_motor.set(ZERO_RIGHT_FAN);
         if (!fail_safe)
         {
             state = State::Hover;
@@ -250,7 +252,7 @@ void update_state_machine(const RxData& rxData, int16_t gyro_z)
         else
         {
             hover_val = MIN_VAL + abs(rxData.dir_us - DIR_CENTER);
-            hoverMotor.set(hover_val);
+            hover_motor.set(hover_val);
         }
         break;
     }
@@ -291,9 +293,9 @@ void serial_out(const RxData& rxData, int16_t gyro_z)
     case 0: serial_print(" rxData.thr: ", rxData.thrust_us); break;
     case 1: serial_print(" rxData.dir: ", rxData.dir_us); break;
     case 2: serial_print(" rxData.hover: ", rxData.hover_us); break;
-    case 3: serial_print(" tx_r: ", rightMotor.value()); break;
-    case 4: serial_print(" tx_l: ", leftMotor.value()); break;
-    case 5: serial_print(" tx_hm: ", hoverMotor.value()); break;
+    case 3: serial_print(" tx_r: ", right_motor.value()); break;
+    case 4: serial_print(" tx_l: ", left_motor.value()); break;
+    case 5: serial_print(" tx_hm: ", hover_motor.value()); break;
     case 6: serial_print(" df: ", rxData.dir_damping_factor); break;
     case 7: serial_print(" gz: ", gyro_z); break;
     case 8: serial_print(" FS: ", fail_safe); break;
@@ -305,8 +307,16 @@ void serial_out(const RxData& rxData, int16_t gyro_z)
 
 void loop()
 {
-    auto&& rxData = read_rc_inputs();
-    auto gyro_z = gyro.read();
-    update_state_machine(rxData, gyro_z);
-    serial_out(rxData, gyro_z);
+    if (rx_done || RcPwm::needsToRun())
+    {
+        rx_done = false;
+
+        auto rxData = read_rc_inputs();
+        auto gyro_z = gyro.read();
+        update_state_machine(rxData, gyro_z);
+
+        RcPwm::runNow();
+
+        serial_out(rxData, gyro_z);
+    }
 }
