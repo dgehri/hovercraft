@@ -15,6 +15,15 @@ public:
         return timer;
     }
 
+    void bump(uint32_t delta)
+    {
+        uint8_t SREG_old = SREG;
+        noInterrupts();
+        _offset += delta % 256;
+        _overflow_count += delta / 256;
+        SREG = SREG_old;
+    }
+
     void setup()
     {
         // backup variables
@@ -63,7 +72,7 @@ public:
             TIFR2 |= 0b00000001;  // reset Timer2 overflow flag since we just manually incremented above; see datasheet
                                   // pg. 160; this prevents execution of Timer2's overflow ISR
         }
-        uint32_t total_count = _overflow_count * 256 + tcnt2_save;  // get total Timer2 count
+        uint32_t total_count = _overflow_count * 256 + tcnt2_save + _offset;  // get total Timer2 count
 
         SREG = SREG_old;  // use this method instead, to re-enable interrupts if they were enabled before, or to leave
                           // them disabled if they were disabled before
@@ -73,6 +82,7 @@ public:
     // Reset counters
     void reset()
     {
+        _offset = 0;
         _overflow_count = 0;  // reset overflow counter
         TCNT2 = 0;  // reset Timer2 counter
         TIFR2 |= 0b00000001;  // reset Timer2 overflow flag; see datasheet pg. 160; this prevents an immediate execution
@@ -93,6 +103,7 @@ private:
     mutable volatile uint32_t _overflow_count;
     uint8_t _tccr2a_save;
     uint8_t _tccr2b_save;
+    volatile uint32_t _offset = 0;
 };
 
 // Interrupt Service Routine (ISR) for when Timer2's counter overflows; this will occur every 128us

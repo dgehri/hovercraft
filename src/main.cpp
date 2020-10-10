@@ -5,6 +5,7 @@
 #include "eeprom_util.h"
 #include "LedGauge.h"
 #include <Arduino.h>
+#include <Adafruit_INA219.h>
 #include <estd/algorithm.h>
 
 constexpr uint8_t PIN_RX_DIR = 2;
@@ -30,7 +31,7 @@ constexpr int16_t INIT_VAL = 900;
 constexpr int16_t ZERO_HOVER_FAN = 980;
 constexpr int16_t ZERO_LEFT_FAN = 1470;
 constexpr int16_t ZERO_RIGHT_FAN = 1477;
-constexpr int16_t HOVER_DEFAULT_VAL = 1100;
+constexpr int16_t HOVER_DEFAULT_VAL = 1150;
 constexpr int16_t HOVER_FAILSAFE_VALUE = 1030;
 
 uint32_t init_time = 0;
@@ -48,6 +49,7 @@ RcChannel dir_channel_rx(PIN_RX_DIR, DIR_CENTER);
 RcChannel hover_channel_rx(PIN_RX_HOVER, MIN_VAL);
 Gyro gyro;
 LedGauge gauge(PIN_NEOPIXEL);
+Adafruit_INA219 ina(0x44);
 
 enum class State
 {
@@ -94,17 +96,20 @@ void setup()
     Serial.println("- Hover Motor");
     hover_motor.setup();
 
-    Serial.println("- Thrust _counter");
+    Serial.println("- Thrust PWM");
     thrust_channel_rx.setup();
 
-    Serial.println("- Steering _counter");
+    Serial.println("- Steering PWM");
     dir_channel_rx.setup();
 
-    Serial.println("- Hover _counter");
+    Serial.println("- Hover PWM");
     hover_channel_rx.setup();
 
     Serial.println("- Timer");
     Timer::instance().setup();
+
+    Serial.println("- Voltage measurement");
+    ina.begin();
 }
 
 // pin change interrupt for receiving RC signals
@@ -188,8 +193,6 @@ void update_state_machine(const RxData& rxData, int16_t gyro_z)
             {
                 state = State::Idle;
             }
-
-            //gauge.rainbowCycle(5);
         }
         break;
 
@@ -244,7 +247,7 @@ void update_state_machine(const RxData& rxData, int16_t gyro_z)
         if (fail_safe || toggle_hover || !tune)
         {
             state = State::Idle;
-            if (hover_val > MIN_VAL && hover_val < MAX_VAL)
+            if (hover_val > HOVER_FAILSAFE_VALUE && hover_val < MAX_VAL)
             {
                 eeprom_write(EEPROM_HOVER_VALUE_ADDR, hover_val);
             }
@@ -280,6 +283,8 @@ void serial_print(const char* label, T value, char eol = '\t')
     Serial.print(eol);
 }
 
+float v = 0.0;
+
 void serial_out(const RxData& rxData, int16_t gyro_z)
 {
     static int16_t k = 0;
@@ -301,22 +306,61 @@ void serial_out(const RxData& rxData, int16_t gyro_z)
     case 8: serial_print(" FS: ", fail_safe); break;
     case 9: serial_print(" ST: ", to_string(state)); break;
     case 10: serial_print(" HV: ", hover_val); break;
+    case 11: serial_print(" V: ", v); break;
     default: k = 0; Serial.println(); break;
     }
 }
 
 void loop()
 {
+    static uint32_t last_run = 0;
+    auto now = Timer::instance().get_count();
+
     if (rx_done || RcPwm::needsToRun())
     {
         rx_done = false;
+        last_run = now;
 
-        auto rxData = read_rc_inputs();
+        auto rx_data = read_rc_inputs();
         auto gyro_z = gyro.read();
-        update_state_machine(rxData, gyro_z);
+        update_state_machine(rx_data, gyro_z);
 
         RcPwm::runNow();
 
-        serial_out(rxData, gyro_z);
+        v = ina.getBusVoltage_V();
+
+        serial_out(rx_data, gyro_z);
+    }
+
+    if (now - last_run < COUNT_PER_MICROS * 1000)
+    {
+        //  0.45 mV voltage drop per hover tx - ZERO_HOVER_FAN
+        //  0.60 mV voltage drop per thrust tx
+        auto dv_l = abs(left_motor.value() - ZERO_LEFT_FAN) * 0.6e-3f;
+        auto dv_r = abs(right_motor.value() - ZERO_RIGHT_FAN) * 0.6e-3f;
+        auto dv_h = (hover_motor.value() - ZERO_HOVER_FAN) * 0.45e-3f;
+        auto v_comp = v + dv_l + dv_r + dv_h;
+
+        switch (state)
+        {
+            case State::Init:
+                gauge.rainbowCycle(5);
+                break;
+
+            case State::Tune:
+                {
+                    int bars = (hover_motor.value() - ZERO_HOVER_FAN) / 50;
+                    gauge.showBars(bars);
+                }
+                break;
+
+            case State::Hover:
+                gauge.showVoltage(v_comp, true);
+                break;
+
+            default:
+                gauge.showVoltage(v_comp, false);
+                break;
+        }
     }
 }
