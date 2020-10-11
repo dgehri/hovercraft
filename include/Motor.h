@@ -40,12 +40,10 @@ public:
     {
         if (clamp)
         {
-            _value_us = estd::clamp(value_us, _range.min_us, _range.max_us);
+            value_us = estd::clamp(value_us, _range.min_us, _range.max_us);
         }
-        else
-        {
-            _value_us = value_us;
-        }
+
+        _value_us = value_us;
 
         if (!_disabled)
         {

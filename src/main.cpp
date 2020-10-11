@@ -155,14 +155,38 @@ void handle_hover_state(const RxData& rxData, int16_t gyro_z)
 {
     hover_motor.set(hover_val);
 
-    auto dir_bias = (gyro_z * ((rxData.dir_damping_factor / 2) + 16)) / 64;
+    auto dir_bias = (gyro_z * ((rxData.dir_damping_factor / 2) + 16)) / 128;
     auto dir_us = rxData.dir_us + dir_bias;
     auto dir_delta_us = dir_us - DIR_CENTER;
     auto right_us = rxData.thrust_us - dir_delta_us;
     auto left_us = rxData.thrust_us + dir_delta_us;
 
-    left_motor.set(ZERO_LEFT_FAN + (left_us - DIR_CENTER) / 2);
-    right_motor.set(ZERO_RIGHT_FAN + (right_us - DIR_CENTER) / 2);
+    static constexpr int16_t MAX_DELTA = 10;
+
+    auto left_set = ZERO_LEFT_FAN + (left_us - DIR_CENTER);
+    auto left_cur = left_motor.value();
+    if (left_set > ZERO_LEFT_FAN && (left_set - left_cur) > MAX_DELTA)
+    {
+        left_set = left_cur + MAX_DELTA;
+    }
+    else if (left_set < ZERO_LEFT_FAN && (left_cur - left_set) > MAX_DELTA)
+    {
+        left_set = left_cur - MAX_DELTA;
+    }
+            
+    auto right_set = ZERO_RIGHT_FAN + (right_us - DIR_CENTER);
+    auto right_cur = right_motor.value();
+    if (right_set > ZERO_RIGHT_FAN && (right_set - right_cur) > MAX_DELTA)
+    {
+        right_set = right_cur + MAX_DELTA;
+    }
+    else if (right_set < ZERO_RIGHT_FAN && (right_cur - right_set) > MAX_DELTA)
+    {
+        right_set = right_cur - MAX_DELTA;
+    }
+
+    left_motor.set(left_set);
+    right_motor.set(right_set);
 }
 
 void update_state_machine(const RxData& rxData, int16_t gyro_z)
