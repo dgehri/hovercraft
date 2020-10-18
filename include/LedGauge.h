@@ -93,7 +93,7 @@ public:
         auto upper_bound = VOLTAGE_LEVELS[estd::clamp(_lastBars, 0, VOLTAGE_LEVELS.size()-1)] + MARGIN;
 
         int bars = _lastBars;
-        if (voltage < lower_bound || voltage > upper_bound)
+        if (m_forceRefresh || voltage < lower_bound || voltage > upper_bound)
         {
             bars = 0;
             for (auto level : VOLTAGE_LEVELS)
@@ -105,7 +105,7 @@ public:
             }
         }
 
-        if (bars != _lastBars)
+        if (bars != _lastBars || m_forceRefresh)
         {
             auto color = COLORS[bars-1];
             _lastBars = bars;
@@ -127,6 +127,7 @@ public:
             }
 
             show();
+            m_forceRefresh = false;
         }
     }
 
@@ -148,6 +149,7 @@ private:
     {
         prevTimer = Timer::instance().get_count();
         _pixels.show();
+        m_forceRefresh = true;
         Timer::instance().bump(NUM_PIXEL * 30 * COUNT_PER_MICROS);
     }
 
@@ -180,4 +182,5 @@ private:
     float _lastVoltage = -1.0;
     int _lastBars = 1;
     uint8_t _glow = 0;
+    bool m_forceRefresh = true;
 };
