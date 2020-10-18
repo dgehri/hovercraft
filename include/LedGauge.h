@@ -2,6 +2,7 @@
 
 #include "Timer.h"
 #include <Adafruit_NeoPixel.h>
+#include <estd/array.h>
 #ifdef __AVR__
 #include <avr/power.h>
 #endif
@@ -59,7 +60,7 @@ public:
 
             for (int i = 0; i < bars; ++i)
             {
-                colors[i] = Adafruit_NeoPixel::Color(0x00, 0x00, 0xff);
+                colors[i] = Adafruit_NeoPixel::Color(0xff, 0x00, 0x00);
             }
 
             for (int i = 0; i < 5; ++i)
@@ -71,79 +72,61 @@ public:
         }
     }
 
-    void showVoltage(float voltage, bool glow, int speedDelayMs = 1)
+    void showVoltage(float voltage, int speedDelayMs = 1)
     {
+        static const estd::array<float, 6> VOLTAGE_LEVELS = { 0.0f, 7.45f, 7.59f, 7.75f, 8.16f, 999.0f };
+        static const estd::array<uint32_t, 5> COLORS = {
+            Adafruit_NeoPixel::Color(255, 0, 51), Adafruit_NeoPixel::Color(0xc7, 0x5f, 0x00),
+            Adafruit_NeoPixel::Color(0x7b, 0x7e, 0x00), Adafruit_NeoPixel::Color(0x00, 0x8b, 0x00), 
+            Adafruit_NeoPixel::Color(0x00, 0x8b, 0x00)
+        };
+        static constexpr float MARGIN = 0.1f;
+
         if (!canShow())
             return;
 
-        if (Timer::instance().get_count() - prevTimer > static_cast<uint16_t>(COUNT_PER_MICROS * speedDelayMs))
+        if (Timer::instance().get_count() - prevTimer < static_cast<uint16_t>(COUNT_PER_MICROS * speedDelayMs))
+            return;
+
+        // get bounds of current level
+        auto lower_bound = VOLTAGE_LEVELS[estd::clamp(_lastBars - 1, 0, VOLTAGE_LEVELS.size()-1)];
+        auto upper_bound = VOLTAGE_LEVELS[estd::clamp(_lastBars, 0, VOLTAGE_LEVELS.size()-1)] + MARGIN;
+
+        int bars = _lastBars;
+        if (voltage < lower_bound || voltage > upper_bound)
         {
-            int bars;
-            uint32_t color;
-
-            float m = 1.0;
-            if (glow)
+            bars = 0;
+            for (auto level : VOLTAGE_LEVELS)
             {
-                _glow += 16;
-                m *= Adafruit_NeoPixel::sine8(_glow);
+                if (voltage < level)
+                    break;
+
+                ++bars;
+            }
+        }
+
+        if (bars != _lastBars)
+        {
+            auto color = COLORS[bars-1];
+            _lastBars = bars;
+
+            uint32_t colors[5];
+            for (int i = 0; i < 5; ++i)
+            {
+                colors[i] = 0;
             }
 
-            // hysteresis
-            auto v = voltage;
-            if (v > _lastVoltage)
+            for (int i = 0; i < bars; ++i)
             {
-                v -= 0.1;
-            }
-            _lastVoltage = voltage;
-
-            if (v > 8.16f)
-            {
-                bars = 5;
-                color = Adafruit_NeoPixel::Color(m*0x00, m*0x8b, m*0x00);
-            }
-            else if (v > 7.75f)
-            {
-                bars = 4;
-                color = Adafruit_NeoPixel::Color(m*0x00, m*0x8b, m*0x00);
-            }
-            else if (v > 7.59)
-            {
-                bars = 3;
-                color = Adafruit_NeoPixel::Color(m*0x7b, m*0x7e, m*0x00);
-            }
-            else if (v > 7.45)
-            {
-                bars = 2;
-                color = Adafruit_NeoPixel::Color(m*0xc7, m*0x5f, m*0x00);
-            }
-            else
-            {
-                bars = 1;
-                color = Adafruit_NeoPixel::Color(m*255, m*0, m*51);
+                colors[i] = color;
             }
 
-            if (bars != _lastBars)
+            for (int i = 0; i < 5; ++i)
             {
-                _lastBars = bars;
-
-                uint32_t colors[5];
-                for (int i = 0; i < 5; ++i)
-                {
-                    colors[i] = 0;
-                }
-
-                for (int i = 0; i < bars; ++i)
-                {
-                    colors[i] = color;
-                }
-
-                for (int i = 0; i < 5; ++i)
-                {
-                    setPixelColor(i, colors[i]);
-                }
-
-                show();
+                setPixelColor(i, colors[i]);
             }
+
+            show();
         }
     }
 
@@ -195,6 +178,6 @@ private:
     RainBowState _rbState;
     uint32_t prevTimer = 0;
     float _lastVoltage = -1.0;
-    int _lastBars = -1;
+    int _lastBars = 1;
     uint8_t _glow = 0;
 };

@@ -31,7 +31,7 @@ constexpr int16_t INIT_VAL = 900;
 constexpr int16_t ZERO_HOVER_FAN = 980;
 constexpr int16_t ZERO_LEFT_FAN = 1470;
 constexpr int16_t ZERO_RIGHT_FAN = 1477;
-constexpr int16_t HOVER_DEFAULT_VAL = 1150;
+constexpr int16_t HOVER_DEFAULT_VAL = 1100;
 constexpr int16_t HOVER_FAILSAFE_VALUE = 1030;
 
 uint32_t init_time = 0;
@@ -40,16 +40,18 @@ bool init_done = false;
 volatile bool rx_done = false;
 int16_t int_count = 0;
 int16_t hover_val = HOVER_DEFAULT_VAL;
-const Range range = {MIN_VAL, MAX_VAL, START_VAL, STOP_VAL};
-Motor left_motor(PIN_TX_LEFT_FAN, range);
-Motor right_motor(PIN_TX_RIGHT_FAN, range);
-Motor hover_motor(PIN_TX_HOVER, range, false);
+const Range range = {MIN_VAL, MAX_VAL};
+const Range hover_range = {1020, 1980};
+Motor left_motor(PIN_TX_LEFT_FAN, hover_range);
+Motor right_motor(PIN_TX_RIGHT_FAN, hover_range);
+Motor hover_motor(PIN_TX_HOVER, range);
 RcChannel thrust_channel_rx(PIN_RX_THRUST, DIR_CENTER);
 RcChannel dir_channel_rx(PIN_RX_DIR, DIR_CENTER);
 RcChannel hover_channel_rx(PIN_RX_HOVER, MIN_VAL);
 Gyro gyro;
 LedGauge gauge(PIN_NEOPIXEL);
 Adafruit_INA219 ina(0x44);
+bool is3s = false;
 
 enum class State
 {
@@ -68,7 +70,6 @@ struct RxData
     int16_t thrust_us;
     int16_t dir_us;
     int16_t hover_us;
-    int16_t dir_damping_factor; // 0 .. 32 (full .. no steering)
 };
 
 void setup()
@@ -134,59 +135,74 @@ RxData read_rc_inputs()
     rx.thrust_us = thrust_channel_rx.pulse_length() / COUNT_PER_MICROS;
     rx.dir_us = dir_channel_rx.pulse_length() / COUNT_PER_MICROS;
     rx.hover_us = hover_channel_rx.pulse_length() / COUNT_PER_MICROS;
+    return rx;
+}
 
-    if (rx.dir_us < DIR_CENTER - DEAD_ZONE)
+/**
+ * Calculate gyro damping factor from steering input
+ * 
+ * @return int16_t 32 for fully applying gyro value; 0 for not applying
+ */
+int16_t calculate_damping_factor(const RxData& rxData)
+{
+    using estd::min;
+
+    int16_t dir_damping_factor; // 0 .. 32 (full .. no steering)
+
+    if (rxData.dir_us < DIR_CENTER - DEAD_ZONE)
     {
-        rx.dir_damping_factor = (max(rx.dir_us, MIN_VAL) - MIN_VAL) / 16;
+        dir_damping_factor = min((max(rxData.dir_us, MIN_VAL) - MIN_VAL) / 16, 32);
     }
-    else if (rx.dir_us > DIR_CENTER + DEAD_ZONE)
+    else if (rxData.dir_us > DIR_CENTER + DEAD_ZONE)
     {
-        rx.dir_damping_factor = (MAX_VAL - estd::min(rx.dir_us, MAX_VAL)) / 16;
+        dir_damping_factor = min((MAX_VAL - min(rxData.dir_us, MAX_VAL)) / 16, 32);
     }
     else
     {
-        rx.dir_damping_factor = (DIR_CENTER - MIN_VAL) / 16;
-    }
+        // no steering => fully apply gyro
+        dir_damping_factor = 32;
+    }   
 
-    return rx;
+    return dir_damping_factor;
 }
 
 void handle_hover_state(const RxData& rxData, int16_t gyro_z)
 {
     hover_motor.set(hover_val);
 
-    auto dir_bias = (gyro_z * ((rxData.dir_damping_factor / 2) + 16)) / 128;
-    auto dir_us = rxData.dir_us + dir_bias;
-    auto dir_delta_us = dir_us - DIR_CENTER;
-    auto right_us = rxData.thrust_us - dir_delta_us;
-    auto left_us = rxData.thrust_us + dir_delta_us;
+    // directional component from steering
+    auto dir_steering = (rxData.dir_us - DIR_CENTER);
 
-    static constexpr int16_t MAX_DELTA = 10;
+    // directional component from thrust
+    auto dir_thrust = rxData.thrust_us;
 
-    auto left_set = ZERO_LEFT_FAN + (left_us - DIR_CENTER);
-    auto left_cur = left_motor.value();
-    if (left_set > ZERO_LEFT_FAN && (left_set - left_cur) > MAX_DELTA)
-    {
-        left_set = left_cur + MAX_DELTA;
-    }
-    else if (left_set < ZERO_LEFT_FAN && (left_cur - left_set) > MAX_DELTA)
-    {
-        left_set = left_cur - MAX_DELTA;
-    }
-            
-    auto right_set = ZERO_RIGHT_FAN + (right_us - DIR_CENTER);
-    auto right_cur = right_motor.value();
-    if (right_set > ZERO_RIGHT_FAN && (right_set - right_cur) > MAX_DELTA)
-    {
-        right_set = right_cur + MAX_DELTA;
-    }
-    else if (right_set < ZERO_RIGHT_FAN && (right_cur - right_set) > MAX_DELTA)
-    {
-        right_set = right_cur - MAX_DELTA;
-    }
+    // directional component from gyro
+    auto gyro_damping_factor = calculate_damping_factor(rxData);
+    auto dir_gyro = (gyro_z * ((gyro_damping_factor / 2) + 16)) / 64;
 
-    left_motor.set(left_set);
-    right_motor.set(right_set);
+    // calculate set-point value
+    auto right_us = dir_thrust - (dir_steering + dir_gyro);
+    auto left_us = dir_thrust + (dir_steering + dir_gyro);
+
+    // compensate for battery type
+    if (is3s)
+    {
+        right_us = ((right_us - DIR_CENTER) / 2) + DIR_CENTER;
+        left_us = ((left_us - DIR_CENTER) / 2) + DIR_CENTER;
+    }
+    else
+    {
+        right_us = (((right_us - DIR_CENTER) * 3) / 4) + DIR_CENTER;
+        left_us = (((left_us - DIR_CENTER) * 3) / 4) + DIR_CENTER;
+    }
+    
+    // apply steering trim
+    right_us += ZERO_LEFT_FAN - DIR_CENTER;
+    left_us += ZERO_RIGHT_FAN - DIR_CENTER;
+
+    static constexpr int16_t MAX_DELTA = 50;
+    right_motor.setFiltered(right_us, ZERO_RIGHT_FAN, MAX_DELTA);
+    left_motor.setFiltered(left_us, ZERO_LEFT_FAN, MAX_DELTA);
 }
 
 void update_state_machine(const RxData& rxData, int16_t gyro_z)
@@ -204,6 +220,13 @@ void update_state_machine(const RxData& rxData, int16_t gyro_z)
     {
     case State::Init:
         {
+            // detect battery
+            auto v = ina.getBusVoltage_V();
+            if (v > 9.0f)
+            {
+                is3s = true;
+            }
+
             int16_t h = eeprom_read_int(EEPROM_HOVER_VALUE_ADDR);
             if (h > MIN_VAL and h < MAX_VAL)
             {
@@ -229,6 +252,9 @@ void update_state_machine(const RxData& rxData, int16_t gyro_z)
             if (!tune)
             {
                 state = State::Hover;
+                // hover_motor.disable();
+                // left_motor.disable();
+                // right_motor.disable();
             }
             else
             {
@@ -325,12 +351,11 @@ void serial_out(const RxData& rxData, int16_t gyro_z)
     case 3: serial_print(" tx_r: ", right_motor.value()); break;
     case 4: serial_print(" tx_l: ", left_motor.value()); break;
     case 5: serial_print(" tx_hm: ", hover_motor.value()); break;
-    case 6: serial_print(" df: ", rxData.dir_damping_factor); break;
-    case 7: serial_print(" gz: ", gyro_z); break;
-    case 8: serial_print(" FS: ", fail_safe); break;
-    case 9: serial_print(" ST: ", to_string(state)); break;
-    case 10: serial_print(" HV: ", hover_val); break;
-    case 11: serial_print(" V: ", v); break;
+    case 6: serial_print(" gz: ", gyro_z); break;
+    case 7: serial_print(" FS: ", fail_safe); break;
+    case 8: serial_print(" ST: ", to_string(state)); break;
+    case 9: serial_print(" HV: ", hover_val); break;
+    case 10: serial_print(" V: ", v); break;
     default: k = 0; Serial.println(); break;
     }
 }
@@ -379,11 +404,11 @@ void loop()
                 break;
 
             case State::Hover:
-                gauge.showVoltage(v_comp, true);
+                gauge.showVoltage(v_comp * is3s ? 2.0f/3.0f : 1.0);
                 break;
 
             default:
-                gauge.showVoltage(v_comp, false);
+                gauge.showVoltage(v_comp * is3s ? 2.0f/3.0f : 1.0);
                 break;
         }
     }
