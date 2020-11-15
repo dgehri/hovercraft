@@ -334,6 +334,7 @@ void serial_print(const char* label, T value, char eol = '\t')
 }
 
 float v = 0.0;
+float v_comp = 0.0;
 
 void serial_out(const RxData& rxData, int16_t gyro_z)
 {
@@ -356,6 +357,7 @@ void serial_out(const RxData& rxData, int16_t gyro_z)
     case 8: serial_print(" ST: ", to_string(state)); break;
     case 9: serial_print(" HV: ", hover_val); break;
     case 10: serial_print(" V: ", v); break;
+    case 11: serial_print(" Vc: ", v_comp); break;
     default: k = 0; Serial.println(); break;
     }
 }
@@ -388,7 +390,11 @@ void loop()
         auto dv_l = abs(left_motor.value() - ZERO_LEFT_FAN) * 0.6e-3f;
         auto dv_r = abs(right_motor.value() - ZERO_RIGHT_FAN) * 0.6e-3f;
         auto dv_h = (hover_motor.value() - ZERO_HOVER_FAN) * 0.45e-3f;
-        auto v_comp = v + dv_l + dv_r + dv_h;
+        v_comp = v + dv_l + dv_r + dv_h;
+        if (is3s)
+        {
+            v_comp *= 2.0f / 3.0f;
+        }
 
         switch (state)
         {
@@ -404,11 +410,11 @@ void loop()
                 break;
 
             case State::Hover:
-                gauge.showVoltage(v_comp * is3s ? 2.0f/3.0f : 1.0);
+                gauge.showVoltage(v_comp);
                 break;
 
             default:
-                gauge.showVoltage(v_comp * is3s ? 2.0f/3.0f : 1.0);
+                gauge.showVoltage(v_comp);
                 break;
         }
     }
